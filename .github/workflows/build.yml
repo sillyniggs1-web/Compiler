@@ -1,0 +1,56 @@
+name: Compile Lua to LuaJIT bytecode
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      strip:
+        description: "Strip debug info (smaller files, no line numbers in errors)"
+        type: boolean
+        default: true
+      ext:
+        description: "Output file extension"
+        type: string
+        default: luac
+
+permissions:
+  contents: write   # needed only for attaching files to a release on v* tags
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    env:
+      STRIP: ${{ (github.event_name == 'workflow_dispatch' && !inputs.strip) && '0' || '1' }}
+      EXT: ${{ github.event.inputs.ext || 'luac' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache LuaJIT build
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: .luajit
+          key: luajit-${{ runner.os }}-${{ hashFiles('scripts/build-luajit.sh') }}
+
+      - name: Build LuaJIT 2.1.0-beta3
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-luajit.sh
+
+      - name: Compile src/ -> dist/
+        run: bash scripts/compile.sh src dist
+
+      - name: Upload bytecode
+        uses: actions/upload-artifact@v4
+        with:
+          name: luajit-bytecode
+          path: dist/
+          if-no-files-found: error
+
+      - name: Attach to release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
